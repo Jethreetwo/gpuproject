@@ -1,8 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "WebFetch(domain:www.gpumode.com)",
-      "WebSearch"
+      "Bash(python3:*)",
+      "Bash(popcorn-cli submit:*)",
+      "Bash(git checkout:*)",
+      "Bash(git stash:*)",
+      "Bash(curl:*)"
     ]
   }
 }
