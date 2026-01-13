@@ -88,8 +88,7 @@ def kernel(
     epilogue_op: cutlass.Constexpr = lambda x: x
     * (1.0 / (1.0 + cute.math.exp(-x, fastmath=True))),
 ):
-    warp_idx = cute.arch.warp_idx()
-    warp_idx = cute.arch.make_warp_uniform(warp_idx)
+    warp_idx = cute.arch.make_warp_uniform(cute.arch.warp_idx())
     tidx = cute.arch.thread_idx()
 
     bidx, bidy, bidz = cute.arch.block_idx()
@@ -101,8 +100,6 @@ def kernel(
         cta_coord[1],
         cta_coord[2],
     )
-    tidx, _, _ = cute.arch.thread_idx()
-
     @cute.struct
     class SharedStorage:
         ab_mbar_ptr: cute.struct.MemRange[cutlass.Int64, num_ab_stage * 2]
@@ -264,11 +261,13 @@ def kernel(
     tmem.wait_for_alloc()
     acc_tmem_ptr = tmem.retrieve_ptr(cutlass.Float32)
     tCtAcc1 = cute.make_tensor(acc_tmem_ptr, tCtAcc_fake.layout)
+    acc1_offset = tcgen05.find_tmem_tensor_col_offset(tCtAcc1)
     acc_tmem_ptr1 = cute.recast_ptr(
-        acc_tmem_ptr + tcgen05.find_tmem_tensor_col_offset(tCtAcc1),
+        acc_tmem_ptr + acc1_offset,
         dtype=cutlass.Float32,
     )
     tCtAcc2 = cute.make_tensor(acc_tmem_ptr1, tCtAcc_fake.layout)
+    acc2_offset = tcgen05.find_tmem_tensor_col_offset(tCtAcc2)
 
     tCtSFA_layout = blockscaled_utils.make_tmem_layout_sfa(
         tiled_mma,
@@ -276,12 +275,8 @@ def kernel(
         sf_vec_size,
         cute.slice_(sfa_smem_layout_staged, (None, None, None, 0)),
     )
-    sfa_tmem_ptr = cute.recast_ptr(
-        acc_tmem_ptr
-        + tcgen05.find_tmem_tensor_col_offset(tCtAcc1)
-        + tcgen05.find_tmem_tensor_col_offset(tCtAcc2),
-        dtype=sf_dtype,
-    )
+    acc_tmem_base = acc_tmem_ptr + acc1_offset + acc2_offset
+    sfa_tmem_ptr = cute.recast_ptr(acc_tmem_base, dtype=sf_dtype)
     tCtSFA = cute.make_tensor(sfa_tmem_ptr, tCtSFA_layout)
 
     tCtSFB_layout = blockscaled_utils.make_tmem_layout_sfb(
@@ -290,20 +285,15 @@ def kernel(
         sf_vec_size,
         cute.slice_(sfb_smem_layout_staged, (None, None, None, 0)),
     )
+    sfa_offset = tcgen05.find_tmem_tensor_col_offset(tCtSFA)
     sfb_tmem_ptr1 = cute.recast_ptr(
-        acc_tmem_ptr
-        + tcgen05.find_tmem_tensor_col_offset(tCtAcc1)
-        + tcgen05.find_tmem_tensor_col_offset(tCtAcc2)
-        + tcgen05.find_tmem_tensor_col_offset(tCtSFA),
+        acc_tmem_base + sfa_offset,
         dtype=sf_dtype,
     )
     tCtSFB1 = cute.make_tensor(sfb_tmem_ptr1, tCtSFB_layout)
+    sfb_offset = tcgen05.find_tmem_tensor_col_offset(tCtSFB1)
     sfb_tmem_ptr2 = cute.recast_ptr(
-        acc_tmem_ptr
-        + tcgen05.find_tmem_tensor_col_offset(tCtAcc1)
-        + tcgen05.find_tmem_tensor_col_offset(tCtAcc2)
-        + tcgen05.find_tmem_tensor_col_offset(tCtSFA)
-        + tcgen05.find_tmem_tensor_col_offset(tCtSFB1),
+        acc_tmem_base + sfa_offset + sfb_offset,
         dtype=sf_dtype,
     )
     tCtSFB2 = cute.make_tensor(sfb_tmem_ptr2, tCtSFB_layout)
